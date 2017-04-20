@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::thread;
 use futures::sync::{mpsc, oneshot};
 use std::sync::{Arc, Mutex};
@@ -20,12 +22,12 @@ pub struct Core {
 
 impl Core {
     pub fn new() -> (Core, EventIterator) {
-        let process = Command::new("../xi-editor/rust/target/debug/xi-core")
+        let process = Command::new("xi-core")
             .stdout(Stdio::piped())
             .stdin(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .expect("Could not spawn core process.");
+            .expect("Could not spawn core process, xi-core must be in your PATH.");
 
         let (update_tx, update_rx) = mpsc::unbounded();
         let rpc_tx_map = Arc::new(Mutex::new(HashMap::new()));
@@ -39,7 +41,7 @@ impl Core {
                           let buf_reader = BufReader::new(stderr);
                           for line in buf_reader.lines() {
                               if let Ok(line) = line {
-                                  writeln!(io::stderr(), "[core] {}", line);
+                                  writeln!(io::stderr(), "[core] {}", line).unwrap();
                               }
                           }
                       });
