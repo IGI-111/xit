@@ -1,10 +1,8 @@
 #![allow(dead_code)]
 
 use std::thread;
-use futures::sync::{mpsc, oneshot};
 use std::sync::{Arc, Mutex};
-use futures::stream::{self, Stream};
-use futures::Future;
+use std::sync::mpsc::{self, Sender, Receiver};
 use std::collections::HashMap;
 use serde_json;
 use std::process::{Stdio, Command, ChildStdin, ChildStdout};
@@ -12,16 +10,15 @@ use std::io::{self, BufReader, BufRead, Write};
 
 pub type Update = serde_json::Value;
 pub type Response = serde_json::Value;
-pub type EventIterator = stream::Wait<mpsc::UnboundedReceiver<Update>>;
 
 pub struct Core {
-    rpc_tx_map: Arc<Mutex<HashMap<u64, oneshot::Sender<Response>>>>,
+    rpc_tx_map: Arc<Mutex<HashMap<u64, Sender<Response>>>>,
     rpc_index: u64,
     stdin: ChildStdin,
 }
 
 impl Core {
-    pub fn new() -> (Core, EventIterator) {
+    pub fn new() -> (Core, Receiver<Update>) {
         let process = Command::new("xi-core")
             .stdout(Stdio::piped())
             .stdin(Stdio::piped())
@@ -29,7 +26,7 @@ impl Core {
             .spawn()
             .expect("Could not spawn core process, xi-core must be in your PATH.");
 
-        let (update_tx, update_rx) = mpsc::unbounded();
+        let (update_tx, update_rx) = mpsc::channel();
         let rpc_tx_map = Arc::new(Mutex::new(HashMap::new()));
         let rpc_tx_map_clone = rpc_tx_map.clone();
 
@@ -50,12 +47,12 @@ impl Core {
              rpc_index: 0,
              stdin: process.stdin.unwrap(),
          },
-         update_rx.wait())
+         update_rx)
     }
 
-    fn event_loop(rpc_tx_map: Arc<Mutex<HashMap<u64, oneshot::Sender<Response>>>>,
+    fn event_loop(rpc_tx_map: Arc<Mutex<HashMap<u64, Sender<Response>>>>,
                   stdout: ChildStdout,
-                  update_tx: mpsc::UnboundedSender<Update>) {
+                  update_tx: Sender<Update>) {
         for line in BufReader::new(stdout).lines() {
             if let Ok(data) = serde_json::from_str(line.unwrap().as_str()) {
                 let req: serde_json::Value = data;
@@ -94,7 +91,7 @@ impl Core {
             "params": params
         });
 
-        let (rpc_tx, rpc_rx) = oneshot::channel();
+        let (rpc_tx, rpc_rx) = mpsc::channel();
         {
             let mut map = self.rpc_tx_map.lock().unwrap();
             map.insert(self.rpc_index, rpc_tx);
@@ -102,7 +99,7 @@ impl Core {
 
         self.send(message);
 
-        rpc_rx.wait().unwrap()
+        rpc_rx.recv().unwrap()
     }
 
     /// Build and send a JSON RPC notification. No response is expected.
